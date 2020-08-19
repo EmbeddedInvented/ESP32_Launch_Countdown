@@ -320,7 +320,7 @@ unsigned long findAndGetNextLaunchTime()
   Serial.println(locationId);
 
   timeClient.update();
-  unsigned long temp_launch_epoch = 0;
+  unsigned long temp_launch_epoch = getLaunchTime(FullResponse);
 
   while( !((locationId == Cape_Id) || (locationId == Kennedy_Id)) || !((int)temp_launch_epoch > timeClient.getEpochTime()) )
   {
