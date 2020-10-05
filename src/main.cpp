@@ -274,26 +274,12 @@ int getLaunchTime(String rawData)
 int printTime7Seg(tmElements_t countdown)
 {
   lc.setDigit(0,7,(int)countdown.Day/10,false);
-
-
   lc.setDigit(0,6,(int)countdown.Day%10,true);
-
-
   lc.setDigit(0,5,(int)countdown.Hour/10,false);
-
-
   lc.setDigit(0,4,(int)countdown.Hour%10,true);
-
-
   lc.setDigit(0,3,(int)countdown.Minute/10,false);
-
-
   lc.setDigit(0,2,(int)countdown.Minute%10,true);
-
-
   lc.setDigit(0,1,(int)countdown.Second/10,false);
-
-
   lc.setDigit(0,0,(int)countdown.Second%10,false);
 
   return 1;
