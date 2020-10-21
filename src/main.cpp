@@ -304,14 +304,15 @@ void printZero7Seg()
 
 void test7Seg()
 {
-  lc.setDigit(0,7,1,true);
-  lc.setDigit(0,6,1,true);
-  lc.setDigit(0,5,1,true);
-  lc.setDigit(0,4,1,true);
-  lc.setDigit(0,3,1,true);
-  lc.setDigit(0,2,1,true);
-  lc.setDigit(0,1,1,true);
-  lc.setDigit(0,0,1,true);
+  lc.setDigit(0,0,0xb,false);
+  lc.setDigit(0,1,0,false);
+  lc.setDigit(0,2,0,false);
+  lc.setChar(0,3,'t',false);
+  lc.setChar(0,4,'I',false);
+  lc.setChar(0,5,'n',false);
+  lc.setChar(0,6,'g',false);
+  lc.setChar(0,7,'-',false);
+
 }
 
 
