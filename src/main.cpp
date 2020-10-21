@@ -58,6 +58,7 @@ int printTime7Seg(tmElements_t countdown);
 unsigned long findAndGetNextLaunchTime();
 void setupWiFi();
 void printZero7Seg();
+void test7Seg();
 
 const size_t capacity = 5000;
 
@@ -94,13 +95,17 @@ void setup() {
   Serial.println();
   Serial.println();
 
-  setupWiFi();
 
   lc.activateAllSegments();
   /* Set the brightness to a medium values */
   lc.setIntensity(8);
   /* and clear the display */
   lc.clearMatrix();
+
+  test7Seg();
+
+  setupWiFi();
+
 }
 
 void loop() {
@@ -273,29 +278,42 @@ int getLaunchTime(String rawData)
 
 int printTime7Seg(tmElements_t countdown)
 {
-  lc.setDigit(0,7,(int)countdown.Day/10,false);
-  lc.setDigit(0,6,(int)countdown.Day%10,true);
-  lc.setDigit(0,5,(int)countdown.Hour/10,false);
-  lc.setDigit(0,4,(int)countdown.Hour%10,true);
-  lc.setDigit(0,3,(int)countdown.Minute/10,false);
-  lc.setDigit(0,2,(int)countdown.Minute%10,true);
-  lc.setDigit(0,1,(int)countdown.Second/10,false);
-  lc.setDigit(0,0,(int)countdown.Second%10,false);
+  lc.setDigit(0,0,(int)countdown.Day/10,true);
+  lc.setDigit(0,1,(int)countdown.Day%10,true);
+  lc.setDigit(0,2,(int)countdown.Hour/10,true);
+  lc.setDigit(0,3,(int)countdown.Hour%10,true);
+  lc.setDigit(0,4,(int)countdown.Minute/10,true);
+  lc.setDigit(0,5,(int)countdown.Minute%10,true);
+  lc.setDigit(0,6,(int)countdown.Second/10,true);
+  lc.setDigit(0,7,(int)countdown.Second%10,true);
 
   return 1;
 }
 
 void printZero7Seg()
 {
-  lc.setDigit(0,7,0,false);
+  lc.setDigit(0,7,0,true);
   lc.setDigit(0,6,0,true);
-  lc.setDigit(0,5,0,false);
+  lc.setDigit(0,5,0,true);
   lc.setDigit(0,4,0,true);
-  lc.setDigit(0,3,0,false);
+  lc.setDigit(0,3,0,true);
   lc.setDigit(0,2,0,true);
-  lc.setDigit(0,1,0,false);
-  lc.setDigit(0,0,0,false);
+  lc.setDigit(0,1,0,true);
+  lc.setDigit(0,0,0,true);
 }
+
+void test7Seg()
+{
+  lc.setDigit(0,7,1,true);
+  lc.setDigit(0,6,1,true);
+  lc.setDigit(0,5,1,true);
+  lc.setDigit(0,4,1,true);
+  lc.setDigit(0,3,1,true);
+  lc.setDigit(0,2,1,true);
+  lc.setDigit(0,1,1,true);
+  lc.setDigit(0,0,1,true);
+}
+
 
 unsigned long findAndGetNextLaunchTime()
 {
@@ -349,8 +367,8 @@ void setupWiFi()
 
   if (Router_SSID != "")
   {
-    ESP_wifiManager.setConfigPortalTimeout(30); //If no access point name has been previously entered disable timeout.
-    Serial.println("Got stored Credentials. Timeout 30s");
+    ESP_wifiManager.setConfigPortalTimeout(1); //If no access point name has been previously entered disable timeout.
+    Serial.println("Got stored Credentials. Timeout 1s for debug");
   }
   else
   {
