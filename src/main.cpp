@@ -8,7 +8,6 @@
 #include <Arduino.h>
 
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
@@ -16,36 +15,9 @@
 #include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <LedController.hpp>
-
-//***************************WIFI MANAGER CONFIGURATION****************************
-#define _WIFIMGR_LOGLEVEL_    3
-
-#include <esp_wifi.h>
-
-#define ESP_getChipId()   ((uint32_t)ESP.getEfuseMac())
-
-#define LED_ON      HIGH
-#define LED_OFF     LOW
-
-String Router_SSID = "Panic! At the Cisco";
-String Router_Pass = "8015463911";
-
-#define USE_AVAILABLE_PAGES     false
-
-#define USE_STATIC_IP_CONFIG_IN_CP          false
-
-#define USE_ESP_WIFIMANAGER_NTP     false
-
-#define USE_CLOUDFLARE_NTP          false
-
-#define USE_DHCP_IP     true
-
-#define USE_CONFIGURABLE_DNS      false
-
-#include <ESP_WiFiManager.h>              //https://github.com/khoih-prog/ESP_WiFiManager
-
-//**********************END WIFI MANAGER CONFIGURATION **********************************
-
+#include <WebServer.h>
+#include <time.h>
+#include <AutoConnect.h>
 
 
 
@@ -56,15 +28,13 @@ String getNextURL(String rawData);
 int getLaunchTime(String rawData);
 int printTime7Seg(tmElements_t countdown);
 unsigned long findAndGetNextLaunchTime();
-void setupWiFi();
 void printZero7Seg();
 void test7Seg();
+void dispayIPAddress(String rawIP);
 
 const size_t capacity = 5000;
 
 const String baseURL = "https://ll.thespacedevs.com/2.0.0/launch/upcoming/?limit=1&offset=0&search=USA";
-
-WiFiMulti multiWiFi;
 
 
 LedController lc =LedController(GPIO_NUM_23,GPIO_NUM_18,GPIO_NUM_5,1);
@@ -85,6 +55,27 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0);
 
 
+//Autoconnect setup code
+WebServer Server;
+
+AutoConnect       Portal(Server);
+AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
+
+void rootPage() {
+  String  content =
+    "<html>"
+    "<head>"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    "<script type=\"text/javascript\">"
+    "</script>"
+    "</head>"
+    "<body>"
+    "<h2 align=\"center\" style=\"color:blue;margin:20px;\">Space Launch Countdown Clock Settings Page updated over the air!</h2>"
+    "<p></p><p style=\"padding-top:15px;text-align:center\">" AUTOCONNECT_LINK(COG_24) "</p>"
+    "</body>"
+    "</html>";
+  Server.send(200, "text/html", content);
+}
 
 void setup() {
 
@@ -95,6 +86,12 @@ void setup() {
   Serial.println();
   Serial.println();
 
+  pinMode(GPIO_NUM_27, OUTPUT);
+
+
+  ledcSetup(0,5000,10);
+  ledcAttachPin(GPIO_NUM_27, 0);
+  ledcWrite(0, 0);
 
   lc.activateAllSegments();
   /* Set the brightness to a medium values */
@@ -104,7 +101,22 @@ void setup() {
 
   test7Seg();
 
-  setupWiFi();
+
+
+  Config.autoReconnect = true;
+  Config.ota = AC_OTA_BUILTIN;
+  Config.hostName = "SpaceCountdown";
+  Portal.config(Config);
+
+  // Behavior a root path of ESP8266WebServer.
+  Server.on("/", rootPage);
+
+  // Establish a connection with an autoReconnect option.
+  if (Portal.begin()) {
+    Serial.println("WiFi connected: " + WiFi.localIP().toString());
+    dispayIPAddress(WiFi.localIP().toString());
+  }
+
 
 }
 
@@ -112,6 +124,7 @@ void loop() {
  nextLaunchTime_Epoch = findAndGetNextLaunchTime();
   while(1)
   {
+    Portal.handleClient();
     timeClient.update();
     breakTime((nextLaunchTime_Epoch - timeClient.getEpochTime()),countdownTime);
 
@@ -146,7 +159,7 @@ void loop() {
         Serial.print(":");
         Serial.print(countdownTime.Minute);
         Serial.print(":");
-        Serial.println(countdownTime.Second);
+        Serial.println(countdownTime.Second);                  
       }
 
     }
@@ -341,57 +354,53 @@ unsigned long findAndGetNextLaunchTime()
 
 }
 
-void setupWiFi()
+void dispayIPAddress(String rawIP)
 {
-    // Use this to personalize DHCP hostname (RFC952 conformed)
-  ESP_WiFiManager ESP_wifiManager("AutoConnectAP");
+  int ip_len = rawIP.length() + 1;
+  char IP[ip_len];
+  rawIP.toCharArray(IP, ip_len);
+  char * ipchunk[4];
+  char digit;
 
-  ESP_wifiManager.setDebugOutput(true);
-
-  //set custom ip for portal
-  ESP_wifiManager.setAPStaticIPConfig(IPAddress(192, 168, 69, 1), IPAddress(192, 168, 69, 1), IPAddress(255, 255, 255, 0));
-
-  ESP_wifiManager.setMinimumSignalQuality(-1);
-
-  // From v1.0.10 only
-  // Set config portal channel, default = 1. Use 0 => random channel from 1-13
-  ESP_wifiManager.setConfigPortalChannel(0);
-
-  // We can't use WiFi.SSID() in ESP32 as it's only valid after connected.
-  // SSID and Password stored in ESP32 wifi_ap_record_t and wifi_config_t are also cleared in reboot
-  // Have to create a new function to store in EEPROM/SPIFFS for this purpose
-  Router_SSID = ESP_wifiManager.WiFi_SSID();
-  Router_Pass = ESP_wifiManager.WiFi_Pass();
-
-  //Remove this line if you do not want to see WiFi password printed
-  Serial.println("Stored: SSID = " + Router_SSID + ", Pass = " + Router_Pass);
-
-  if (Router_SSID != "")
+  ipchunk[0] = strtok(IP,".");
+  Serial.println(ipchunk[0]);
+  for(int i = 1; i<4; i++)
   {
-    ESP_wifiManager.setConfigPortalTimeout(1); //If no access point name has been previously entered disable timeout.
-    Serial.println("Got stored Credentials. Timeout 1s for debug");
+    ipchunk[i] = strtok(NULL,".");
+    Serial.println(ipchunk[i]);
   }
-  else
+  //Print first digits with "IP"
+  lc.setChar(0,0,'I',true);
+  lc.setChar(0,1,'P',true);
+  for(int i = 0; i<(strlen(ipchunk[0])); i++)
   {
-    Serial.println("No stored Credentials. No timeout");
+    memcpy(&digit,ipchunk[0] + i,1);
+    Serial.println(digit);
+    lc.setChar(0,2+i,digit,false);
   }
-
-  String chipID = String(ESP_getChipId(), HEX);
-  chipID.toUpperCase();
-
-  // SSID and PW for Config Portal
-  String AP_SSID = "ESP_" + chipID + "_LaunchCountdownClock";
-  String AP_PASS = "MyESP_" + chipID;
-
-  // Get Router SSID and PASS from EEPROM, then open Config portal AP named "ESP_XXXXXX_AutoConnectAP" and PW "MyESP_XXXXXX"
-  // 1) If got stored Credentials, Config portal timeout is 60s
-  // 2) If no stored Credentials, stay in Config portal until get WiFi Credentials
-  ESP_wifiManager.autoConnect(AP_SSID.c_str(), AP_PASS.c_str());
-  //or use this for Config portal AP named "ESP_XXXXXX" and NULL password
-  //ESP_wifiManager.autoConnect();
-
-  //if you get here you have connected to the WiFi
-  Serial.println("WiFi connected");
+  for(int i = (strlen(ipchunk[0]) + 2); i<8; i++)
+  {
+    Serial.println(i);
+    lc.setChar(0,i,' ',false);
+  }
+  delay(2000);
+  //print 2nd, 3rd, 4th digits:
+  for(int j = 1; j < 4; j++)
+  {
+    lc.setChar(0,0,' ',false);
+    lc.setChar(0,1,' ',false);
+    for(int i = 0; i<(strlen(ipchunk[j])); i++)
+    {
+      memcpy(&digit,ipchunk[j] + i,1);
+      Serial.println(digit);
+      lc.setChar(0,2+i,digit,false);
+    }
+    for(int i = (strlen(ipchunk[j]) + 2); i<8; i++)
+    {
+      Serial.println(i);
+      lc.setChar(0,i,' ',false);
+    }
+    delay(2000);  
+  }
 
 }
-
