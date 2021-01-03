@@ -28,9 +28,11 @@ String getNextURL(String rawData);
 int getLaunchTime(String rawData);
 int printTime7Seg(tmElements_t countdown);
 unsigned long findAndGetNextLaunchTime();
-void printZero7Seg();
-void test7Seg();
 void dispayIPAddress(String rawIP);
+void deleteAllCredentials();
+void printString7Seg(String input, bool colon);
+bool portalStartFn(IPAddress& ip);
+bool connectedFn(IPAddress& ip);
 
 const size_t capacity = 5000;
 
@@ -56,10 +58,35 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 0);
 
 
 //Autoconnect setup code
+
+#define AC_DEBUG
 WebServer Server;
 
 AutoConnect       Portal(Server);
 AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
+AutoConnectAux    SpaceSettings;
+
+static const char SPACE_SETTINGS[] PROGMEM = R"(
+{
+  "title": "CountDown Settings",
+  "uri": "/CD",
+  "menu": true,
+  "element": [
+    {
+      "name": "caption",
+      "type": "ACText",
+      "value": "Deletes all saved WiFi credentials and reboots. Device will need to be re-set-up",
+      "style": "font-family:Arial;font-weight:bold;text-align:center;margin-bottom:10px;color:DarkSlateBlue"
+    },
+    {
+      "name": "rWiFi",
+      "type": "ACSubmit",
+      "value": "RESET WIFI",
+      "uri": "/rwifi"
+    }
+  ]
+}
+)";
 
 void rootPage() {
   String  content =
@@ -76,6 +103,7 @@ void rootPage() {
     "</html>";
   Server.send(200, "text/html", content);
 }
+
 
 void setup() {
 
@@ -99,73 +127,85 @@ void setup() {
   /* and clear the display */
   lc.clearMatrix();
 
-  test7Seg();
-
-
+  printString7Seg("booting ",false);
 
   Config.autoReconnect = true;
+  Config.reconnectInterval= 1;
   Config.ota = AC_OTA_BUILTIN;
   Config.hostName = "SpaceCountdown";
+  Config.portalTimeout = 0;//120000; //2 minute portal timeout
+  Config.apid = "Space_Countdown_" + String((uint32_t)(ESP.getEfuseMac() >> 32), HEX);
+  Config.psk = "spacecountdown";
   Portal.config(Config);
+  
+  SpaceSettings.load(SPACE_SETTINGS);
+  Portal.join({SpaceSettings});
 
+
+  Server.on("/rwifi",deleteAllCredentials);
   // Behavior a root path of ESP8266WebServer.
   Server.on("/", rootPage);
-
+  
+  //Display message on screen when captive portal is properly loaded
+  Portal.onDetect(portalStartFn);
+  //Display message on screen when Wifi is connected 
+  Portal.onConnect(connectedFn);
   // Establish a connection with an autoReconnect option.
   if (Portal.begin()) {
     Serial.println("WiFi connected: " + WiFi.localIP().toString());
     dispayIPAddress(WiFi.localIP().toString());
   }
-
-
 }
 
 void loop() {
- nextLaunchTime_Epoch = findAndGetNextLaunchTime();
-  while(1)
+  if(WiFi.isConnected())
   {
-    Portal.handleClient();
-    timeClient.update();
-    breakTime((nextLaunchTime_Epoch - timeClient.getEpochTime()),countdownTime);
-
-    if( (nextLaunchTime_Epoch - timeClient.getEpochTime()) <= 0 )
+  nextLaunchTime_Epoch = findAndGetNextLaunchTime();
+    while(1)
     {
-      if( (nextLaunchTime_Epoch - timeClient.getEpochTime() + 1800) <0 )
+      Portal.handleClient();
+      timeClient.update();
+      breakTime((nextLaunchTime_Epoch - timeClient.getEpochTime()),countdownTime);
+
+      if( (nextLaunchTime_Epoch - timeClient.getEpochTime()) <= 0 )
       {
-        nextLaunchTime_Epoch = findAndGetNextLaunchTime();
+        if( (nextLaunchTime_Epoch - timeClient.getEpochTime() + 1800) <0 )
+        {
+          nextLaunchTime_Epoch = findAndGetNextLaunchTime();
+        }
+        else
+        {
+          printString7Seg("00000000",true);
+        }
       }
+
       else
       {
-        printZero7Seg();
+        if((nextLaunchTime_Epoch - timeClient.getEpochTime())%7200 == 0)
+        {
+          nextLaunchTime_Epoch = findAndGetNextLaunchTime();
+        }
+        countdownTime.Day = countdownTime.Day - 1;
+
+        if(countdownTime.Second != countdownTimePrev.Second)
+        {
+          printTime7Seg(countdownTime);
+          countdownTimePrev = countdownTime;
+
+          Serial.print(countdownTime.Day);
+          Serial.print(":");
+          Serial.print(countdownTime.Hour);
+          Serial.print(":");
+          Serial.print(countdownTime.Minute);
+          Serial.print(":");
+          Serial.println(countdownTime.Second);                  
+        }
       }
     }
-
-    else
-    {
-      if((nextLaunchTime_Epoch - timeClient.getEpochTime())%7200 == 0)
-      {
-        nextLaunchTime_Epoch = findAndGetNextLaunchTime();
-      }
-      countdownTime.Day = countdownTime.Day - 1;
-
-      if(countdownTime.Second != countdownTimePrev.Second)
-      {
-        printTime7Seg(countdownTime);
-        countdownTimePrev = countdownTime;
-
-        Serial.print(countdownTime.Day);
-        Serial.print(":");
-        Serial.print(countdownTime.Hour);
-        Serial.print(":");
-        Serial.print(countdownTime.Minute);
-        Serial.print(":");
-        Serial.println(countdownTime.Second);                  
-      }
-
-    }
-
-
-
+  }
+  else
+  {
+    Portal.handleClient();
   }
 }
 
@@ -173,7 +213,7 @@ void loop() {
 //function to HTTP GET the data from the spacedev API
 String spaceDevHttpGet(String URL)
 {
-    WiFiClientSecure *client = new WiFiClientSecure;
+  WiFiClientSecure *client = new WiFiClientSecure;
   if(client) {
     //client -> setCACert(rootCACertificate); //do not add a certificate so we can connect insecurely indefinitely
 
@@ -303,31 +343,14 @@ int printTime7Seg(tmElements_t countdown)
   return 1;
 }
 
-void printZero7Seg()
+
+void printString7Seg(String input, bool colon)
 {
-  lc.setDigit(0,7,0,true);
-  lc.setDigit(0,6,0,true);
-  lc.setDigit(0,5,0,true);
-  lc.setDigit(0,4,0,true);
-  lc.setDigit(0,3,0,true);
-  lc.setDigit(0,2,0,true);
-  lc.setDigit(0,1,0,true);
-  lc.setDigit(0,0,0,true);
+  for(int i=0; i<8; i++)
+  {
+    lc.setChar(0,i,input.substring(i,i+1)[0],colon);
+  }
 }
-
-void test7Seg()
-{
-  lc.setDigit(0,0,0xb,false);
-  lc.setDigit(0,1,0,false);
-  lc.setDigit(0,2,0,false);
-  lc.setChar(0,3,'t',false);
-  lc.setChar(0,4,'I',false);
-  lc.setChar(0,5,'n',false);
-  lc.setChar(0,6,'g',false);
-  lc.setChar(0,7,'-',false);
-
-}
-
 
 unsigned long findAndGetNextLaunchTime()
 {
@@ -340,7 +363,7 @@ unsigned long findAndGetNextLaunchTime()
   timeClient.update();
   unsigned long temp_launch_epoch = getLaunchTime(FullResponse);
 
-  while( !((locationId == Cape_Id) || (locationId == Kennedy_Id)) || !((int)temp_launch_epoch > timeClient.getEpochTime()) )
+  while( !(((locationId == Cape_Id) || (locationId == Kennedy_Id)) && ((int)temp_launch_epoch > timeClient.getEpochTime())) )
   {
     delay(1000);
     Serial.println(locationId);
@@ -354,6 +377,7 @@ unsigned long findAndGetNextLaunchTime()
 
 }
 
+//function to display the IP address on the 7-segment displays
 void dispayIPAddress(String rawIP)
 {
   int ip_len = rawIP.length() + 1;
@@ -363,11 +387,9 @@ void dispayIPAddress(String rawIP)
   char digit;
 
   ipchunk[0] = strtok(IP,".");
-  Serial.println(ipchunk[0]);
   for(int i = 1; i<4; i++)
   {
     ipchunk[i] = strtok(NULL,".");
-    Serial.println(ipchunk[i]);
   }
   //Print first digits with "IP"
   lc.setChar(0,0,'I',true);
@@ -375,12 +397,10 @@ void dispayIPAddress(String rawIP)
   for(int i = 0; i<(strlen(ipchunk[0])); i++)
   {
     memcpy(&digit,ipchunk[0] + i,1);
-    Serial.println(digit);
     lc.setChar(0,2+i,digit,false);
   }
   for(int i = (strlen(ipchunk[0]) + 2); i<8; i++)
   {
-    Serial.println(i);
     lc.setChar(0,i,' ',false);
   }
   delay(2000);
@@ -392,15 +412,38 @@ void dispayIPAddress(String rawIP)
     for(int i = 0; i<(strlen(ipchunk[j])); i++)
     {
       memcpy(&digit,ipchunk[j] + i,1);
-      Serial.println(digit);
       lc.setChar(0,2+i,digit,false);
     }
     for(int i = (strlen(ipchunk[j]) + 2); i<8; i++)
     {
-      Serial.println(i);
       lc.setChar(0,i,' ',false);
     }
     delay(2000);  
   }
+}
 
+void deleteAllCredentials() {
+  AutoConnectCredential credential;
+  station_config_t config;
+  uint8_t ent = credential.entries();
+  WiFi.disconnect(true,true);
+
+  while (ent--) {
+    credential.load((int8_t)0, &config);
+    credential.del((const char*)&config.ssid[0]);
+  }
+  ESP.restart();
+}
+
+bool portalStartFn(IPAddress& ip)
+{
+  printString7Seg("portal  ",false);
+  return true;
+}
+
+bool connectedFn(IPAddress& ip)
+{
+  printString7Seg("success ", false);
+  delay(2000);
+  return true;
 }
