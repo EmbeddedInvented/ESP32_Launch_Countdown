@@ -97,7 +97,7 @@ void rootPage() {
     "</script>"
     "</head>"
     "<body>"
-    "<h2 align=\"center\" style=\"color:blue;margin:20px;\">Space Launch Countdown Clock Settings Page updated over the air!</h2>"
+    "<h2 align=\"center\" style=\"color:blue;margin:20px;\">Space Launch Countdown Clock Settings Page, click below to configure the device.</h2>"
     "<p></p><p style=\"padding-top:15px;text-align:center\">" AUTOCONNECT_LINK(COG_24) "</p>"
     "</body>"
     "</html>";
