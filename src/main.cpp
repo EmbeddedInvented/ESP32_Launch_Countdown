@@ -123,7 +123,7 @@ void setup() {
 
   lc.activateAllSegments();
   /* Set the brightness to a medium values */
-  lc.setIntensity(8);
+  lc.setIntensity(1);
   /* and clear the display */
   lc.clearMatrix();
 
@@ -216,7 +216,7 @@ String spaceDevHttpGet(String URL)
   WiFiClientSecure *client = new WiFiClientSecure;
   if(client) {
     //client -> setCACert(rootCACertificate); //do not add a certificate so we can connect insecurely indefinitely
-
+    client->setInsecure();
     {
       // Add a scoping block for HTTPClient https to make sure it is destroyed before WiFiClientSecure *client is 
       HTTPClient https;
