@@ -1,12 +1,20 @@
 /**
-   BasicHTTPSClient.ino
+   Main.cpp
 
-    Created on: 14.10.2018
+    Created on: 10.10.2020
 
+    Main program for the Space Launch countdown clock. 
+
+    This program uses the Space Devs (thespacedevs.com) free API to retrieve the next space launch. 
+    
+    It then uses ntp time to calculate the current countdown and display it on 8 7-segment displays.
+
+    All configuration (WiFi, settings) is performed by the Autoconnect library (https://hieromon.github.io/AutoConnect/)
+
+    All code is done using the Arduino framework
 */
 
 #include <Arduino.h>
-
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -18,12 +26,12 @@
 #include <WebServer.h>
 #include <time.h>
 #include <AutoConnect.h>
+#include <Preferences.h>
 
 
-
+//predefine all of our functions 
 void setClock();
 String spaceDevHttpGet(String URL);
-int getLocationId(String rawData);
 String getNextURL(String rawData);
 int getLaunchTime(String rawData);
 int printTime7Seg(tmElements_t countdown);
@@ -33,16 +41,18 @@ void deleteAllCredentials();
 void printString7Seg(String input, bool colon);
 bool portalStartFn(IPAddress& ip);
 bool connectedFn(IPAddress& ip);
+String saveURL(AutoConnectAux& aux, PageArgument& args);
+String onAPISettings(AutoConnectAux& aux, PageArgument& args);
 
+//maximum expected size of the JSON responses that we will be parsing
 const size_t capacity = 5000;
 
-const String baseURL = "https://ll.thespacedevs.com/2.0.0/launch/upcoming/?limit=1&offset=0&search=USA";
+String baseURL;
+int digit_brightness;
 
-
+//Create our 7-segment interface
 LedController lc =LedController(GPIO_NUM_23,GPIO_NUM_18,GPIO_NUM_5,1);
 
-const int Cape_Id = 12;
-const int Kennedy_Id = 27;
 
 unsigned long nextLaunchTime_Epoch;
 
@@ -56,19 +66,33 @@ time_t nextLaunch_timestamp; // a timestamp
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0);
 
+//Preferences used to save data in non-volatile memory
+Preferences prefs;
 
 //Autoconnect setup code
-
 #define AC_DEBUG
 WebServer Server;
-
 AutoConnect       Portal(Server);
-AutoConnectConfig Config;       // Enable autoReconnect supported on v0.9.4
+AutoConnectConfig Config;
+
+//Autoconnect auxilliary pages setup code 
 AutoConnectAux    SpaceSettings;
+AutoConnectAux    APISettings("/api_settings", "API Settings");
+AutoConnectText APIHeader("APIHeader", "TheSpaceDevs API Settings", "font-family:Arial;font-weight:bold;text-align:center;margin-bottom:10px;color:DarkSlateBlue");
+AutoConnectText APICaption("APICaption", "Use this page to configure an optional API key, or change the request URL."
+"Through the request URL you can change the launch locations of interest. Launch locations are configured through the 'Pad location ID' at the end of the URL."
+"Multiple pad location IDs can be defined by adding more separated by commas. The default URL (for only KSC and Cape Canaveral) is https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&offset=0&location__ids=27,12"
+"The device can only parse json data from the /launch/upcoming API endopoint, for luanches in the future."
+"The device must be reset for changes to take effect. For info see the API documentation https://thespacedevs.com/");
+AutoConnectAux    APISettings_Save("/api_save", "API Settings Saved", false);
+AutoConnectInput URLInput("URLInput", "", "Request URL", "");
+AutoConnectInput LEDBrightness("LEDBrightness", "", "Brightness (0-15)", "");
+AutoConnectSubmit URLSubmit("URLSubmit", "Save", "/api_save");
+AutoConnectText APISaveHeader("APISaveHeader", "Saved Succesfully", "font-family:Arial;font-weight:bold;text-align:center;margin-bottom:10px;color:DarkSlateBlue");
 
 static const char SPACE_SETTINGS[] PROGMEM = R"(
 {
-  "title": "CountDown Settings",
+  "title": "Device Settings",
   "uri": "/CD",
   "menu": true,
   "element": [
@@ -104,26 +128,22 @@ void rootPage() {
   Server.send(200, "text/html", content);
 }
 
-
+//Setup code to be run once on starup
 void setup() {
 
   Serial.begin(115200);
-  // Serial.setDebugOutput(true);
 
-  Serial.println();
-  Serial.println();
-  Serial.println();
-
+  //Enable our speaker pin, and disable by default
   pinMode(GPIO_NUM_27, OUTPUT);
-
-
   ledcSetup(0,5000,10);
   ledcAttachPin(GPIO_NUM_27, 0);
   ledcWrite(0, 0);
 
   lc.activateAllSegments();
+
   /* Set the brightness to a medium values */
-  lc.setIntensity(1);
+  digit_brightness = prefs.getInt("brightness", 1);
+  lc.setIntensity(digit_brightness);
   /* and clear the display */
   lc.clearMatrix();
 
@@ -133,16 +153,28 @@ void setup() {
   Config.reconnectInterval= 1;
   Config.ota = AC_OTA_BUILTIN;
   Config.hostName = "SpaceCountdown";
-  Config.portalTimeout = 0;//120000; //2 minute portal timeout
+  Config.portalTimeout = 120000; //2 minute portal timeout
   Config.apid = "Space_Countdown_" + String((uint32_t)(ESP.getEfuseMac() >> 32), HEX);
   Config.psk = "spacecountdown";
   Portal.config(Config);
   
   SpaceSettings.load(SPACE_SETTINGS);
-  Portal.join({SpaceSettings});
+  APISettings.add({APIHeader,APICaption,URLInput,LEDBrightness,URLSubmit});
+  APISettings_Save.add({APISaveHeader});
 
+  Portal.join({SpaceSettings,APISettings,APISettings_Save});
+  
+
+  prefs.begin("spaceCountdown", false);
+
+  baseURL = prefs.getString("baseURL", "https://lldev.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&offset=0&location__ids=27,12");
+  Serial.print("Base URL Is: " + baseURL);
+
+  APISettings.on(onAPISettings);
 
   Server.on("/rwifi",deleteAllCredentials);
+  
+  Portal.on("/api_save", saveURL);
   // Behavior a root path of ESP8266WebServer.
   Server.on("/", rootPage);
   
@@ -215,8 +247,7 @@ String spaceDevHttpGet(String URL)
 {
   WiFiClientSecure *client = new WiFiClientSecure;
   if(client) {
-    //client -> setCACert(rootCACertificate); //do not add a certificate so we can connect insecurely indefinitely
-    client->setInsecure();
+    client->setInsecure(); //connect insecurely, no sensitive data is changing hands
     {
       // Add a scoping block for HTTPClient https to make sure it is destroyed before WiFiClientSecure *client is 
       HTTPClient https;
@@ -225,6 +256,7 @@ String spaceDevHttpGet(String URL)
       if (https.begin(*client, URL)) {  // HTTPS
         Serial.print("[HTTPS] GET...\n");
         // start connection and send HTTP header
+        //https.addHeader();
         int httpCode = https.GET();
   
         // httpCode will be negative on error
@@ -239,7 +271,7 @@ String spaceDevHttpGet(String URL)
           }
         } else {
           Serial.printf("[HTTPS] GET... failed, error: %s\n", https.errorToString(httpCode).c_str());
-          return "";
+          return "fail";
         }
   
         https.end();
@@ -256,21 +288,6 @@ String spaceDevHttpGet(String URL)
     Serial.println("Unable to create client");
     return "";
   }
-}
-
-int getLocationId(String rawData)
-{
-  DynamicJsonDocument doc(capacity);
-
-  // Parse JSON object
-  DeserializationError error = deserializeJson(doc, rawData);
-  if (error) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(error.c_str());
-  }
-  
-  Serial.println(doc["results"][0]["pad"]["location"]["id"].as<String>());
-  return doc["results"][0]["pad"]["location"]["id"].as<int>();
 }
 
 String getNextURL(String rawData)
@@ -356,23 +373,14 @@ unsigned long findAndGetNextLaunchTime()
 {
         
   String FullResponse = spaceDevHttpGet(baseURL);
+  if(FullResponse == "fail")
+  {
+    return 0; //TODO
+  }
   
-  int locationId = getLocationId(FullResponse);
-  Serial.println(locationId);
-
   timeClient.update();
   unsigned long temp_launch_epoch = getLaunchTime(FullResponse);
 
-  while( !(((locationId == Cape_Id) || (locationId == Kennedy_Id)) && ((int)temp_launch_epoch > timeClient.getEpochTime())) )
-  {
-    delay(1000);
-    Serial.println(locationId);
-    Serial.println(getNextURL(FullResponse));
-    FullResponse = spaceDevHttpGet(getNextURL(FullResponse));
-    locationId = getLocationId(FullResponse);
-    Serial.println(FullResponse);
-    temp_launch_epoch = getLaunchTime(FullResponse);
-  }
   return temp_launch_epoch;
 
 }
@@ -446,4 +454,34 @@ bool connectedFn(IPAddress& ip)
   printString7Seg("success ", false);
   delay(2000);
   return true;
+}
+
+String saveURL(AutoConnectAux& aux, PageArgument& args) {
+  
+  
+  AutoConnectAux&   API_setting = *Portal.aux(Portal.where());
+  String testvalue = API_setting["URLInput"].value;
+  testvalue.trim();
+  
+  String SLEDBrightness = API_setting["LEDBrightness"].value;
+  SLEDBrightness.trim();
+  digit_brightness = SLEDBrightness.toInt();
+  if(digit_brightness < 16 && digit_brightness >= 0) {
+    prefs.putInt("brightness", digit_brightness);
+    lc.setIntensity(digit_brightness);
+  }
+
+  Serial.print(testvalue);
+  return "";
+}
+
+//Use this to fill in the API settings page with the current values 
+String onAPISettings(AutoConnectAux& aux, PageArgument& args) {
+  AutoConnectInput& input1 = aux.getElement<AutoConnectInput>("URLInput");
+  AutoConnectInput& input2 = aux.getElement<AutoConnectInput>("LEDBrightness");
+
+  input1.value = prefs.getString("baseURL", "https://lldev.thespacedevs.com/2.0.0/launch/upcoming/?limit=1&offset=0&search=USA");
+  input2.value = prefs.getInt("brightness", 1);
+
+  return "";
 }
