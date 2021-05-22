@@ -48,7 +48,7 @@ String onAPISettings(AutoConnectAux& aux, PageArgument& args);
 const size_t capacity = 5000;
 
 String baseURL;
-int digit_brightness;
+int32_t digit_brightness;
 
 //Create our 7-segment interface
 LedController lc =LedController(GPIO_NUM_23,GPIO_NUM_18,GPIO_NUM_5,1);
@@ -132,6 +132,8 @@ void rootPage() {
 void setup() {
 
   Serial.begin(115200);
+  prefs.begin("spaceCountdown", false);
+
 
   //Enable our speaker pin, and disable by default
   pinMode(GPIO_NUM_27, OUTPUT);
@@ -163,9 +165,6 @@ void setup() {
   APISettings_Save.add({APISaveHeader});
 
   Portal.join({SpaceSettings,APISettings,APISettings_Save});
-  
-
-  prefs.begin("spaceCountdown", false);
 
   baseURL = prefs.getString("baseURL", "https://lldev.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&offset=0&location__ids=27,12");
   Serial.print("Base URL Is: " + baseURL);
@@ -460,18 +459,19 @@ String saveURL(AutoConnectAux& aux, PageArgument& args) {
   
   
   AutoConnectAux&   API_setting = *Portal.aux(Portal.where());
-  String testvalue = API_setting["URLInput"].value;
-  testvalue.trim();
+  String S_URLInput = API_setting["URLInput"].value;
+  S_URLInput.trim();
+  prefs.putString("baseURL", S_URLInput);
+  
   
   String SLEDBrightness = API_setting["LEDBrightness"].value;
   SLEDBrightness.trim();
   digit_brightness = SLEDBrightness.toInt();
   if(digit_brightness < 16 && digit_brightness >= 0) {
-    prefs.putInt("brightness", digit_brightness);
+    prefs.putInt("brightness", int32_t(digit_brightness));
     lc.setIntensity(digit_brightness);
   }
 
-  Serial.print(testvalue);
   return "";
 }
 
@@ -480,7 +480,7 @@ String onAPISettings(AutoConnectAux& aux, PageArgument& args) {
   AutoConnectInput& input1 = aux.getElement<AutoConnectInput>("URLInput");
   AutoConnectInput& input2 = aux.getElement<AutoConnectInput>("LEDBrightness");
 
-  input1.value = prefs.getString("baseURL", "https://lldev.thespacedevs.com/2.0.0/launch/upcoming/?limit=1&offset=0&search=USA");
+  input1.value = prefs.getString("baseURL", "https://lldev.thespacedevs.com/2.2.0/launch/upcoming/?limit=1&offset=0&location__ids=27,12");
   input2.value = prefs.getInt("brightness", 1);
 
   return "";
